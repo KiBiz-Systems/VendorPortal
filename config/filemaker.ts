@@ -11,4 +11,5 @@ export const FILEMAKER_LAYOUTS = {
   lineItems: "Web_MLI",
   qualityParameters: "Web_QPA",
   documents: "",
+  companyProfile: "CPR_Web",
 };

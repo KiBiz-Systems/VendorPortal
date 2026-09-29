@@ -14,6 +14,7 @@ import {
 } from "recharts"
 import { useDashboardData } from "./dashboard-data-context"
 import DashboardLoadingSkeleton from "./dashboard-loading-skeleton"
+import { formatCurrency } from "@/lib/format"
 
 const EMPTY_VALUE = "--"
 
@@ -274,7 +275,7 @@ export default function DashboardPage() {
                             {order.paymentDate || EMPTY_VALUE}
                           </td>
                           <td className="px-5 py-5 text-[16px] font-bold text-foreground whitespace-nowrap">
-                            {order.totalAmount || EMPTY_VALUE}
+                            {formatCurrency(order.totalAmount, EMPTY_VALUE)}
                           </td>
                           <td className="px-5 py-5 md:px-7">
                             <span
@@ -302,14 +303,6 @@ export default function DashboardPage() {
       )}
     </>
   )
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(value)
 }
 
 function compactCurrency(value: number) {

@@ -1,51 +1,32 @@
 "use client"
 
 import Link from "next/link"
-import { useCallback, useEffect, useState } from "react"
-import { useParams } from "next/navigation"
+import { useEffect, useState } from "react"
+import { useParams, useRouter } from "next/navigation"
 import { ArrowLeft, Loader2, LucideIcon, Package, Truck, Building2 } from "lucide-react"
-import { useDashboardData } from "../../dashboard-data-context"
-import { OrderDocumentsTabs } from "@/components/order-documents-tabs"
-import { OrderNotesComments } from "@/components/order-notes-comments"
-import { OrderStatusActions } from "@/components/order-status-actions"
-import { OrderAcknowledgeControl } from "@/components/order-acknowledge-control"
+import { AdminOrderSpecSheets } from "@/components/admin-order-spec-sheets"
+import { AdminOrderDocumentsPanel } from "@/components/admin-order-documents-panel"
 import { formatCurrency, formatQty } from "@/lib/format"
 
 type OrderDetails = {
   header: {
-    poNumber: string
     poNumberDisplay: string
     orderPlacedBy: string
-    dateEntered: string
-    deliveredVia: string
-    dateScheduled: string
-    dateReceived: string
     freightType: string
     freightOnBoard: string
     vendorContractNumber: string
-    shippingTo: string
     category: string
-    paidType: string
-    prePaidPercent: string
+    dateScheduled: string
+    deliveredVia: string
+    paymentDate: string
     companyName: string
     personName: string
     address: string
     mainPhone: string
-    secondPhone: string
-    paymentDate: string
     totalAmount: string
     status: string
     notes: string
     vendorComments: string
-    trackingNo: string
-    vendorInvoiceNo: string
-    orderShippedDate: string
-    estArrivalDate: string
-    vendorAcknowledged: string
-    vendorAcknowledgedBy: string
-    vendorAcknowledgedOn: string
-    orderPlacedOn: string
-    readyOn: string
   }
   lineItems: Array<{
     itemNo: string
@@ -115,31 +96,41 @@ function SummaryCard({
   )
 }
 
-function getLineItemKey(
-  item: OrderDetails["lineItems"][number],
-  index: number
-) {
+function getLineItemKey(item: OrderDetails["lineItems"][number], index: number) {
   return [
     item.itemNo || "no-item",
     item.productName || "no-product",
     item.unitType || "no-unit",
     item.serialNo || "no-serial",
-    item.actualPurchQty || "no-qty",
-    item.invoicedAmount || "no-amount",
     String(index),
   ].join("|")
 }
 
-export default function OrderDetailsPage() {
+function getStatusClassName(status?: string | null) {
+  switch ((status || "").trim().toLowerCase()) {
+    case "open":
+      return "border-2 border-blue-300 bg-blue-50 text-blue-700 dark:border-[#63a3ff]/60 dark:bg-transparent dark:text-[#63a3ff]"
+    case "ap pending":
+      return "border-2 border-amber-300 bg-amber-50 text-amber-700 dark:border-[#ffb020]/60 dark:bg-transparent dark:text-[#ffb020]"
+    case "closed":
+      return "border-2 border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-[#34d399]/60 dark:bg-transparent dark:text-[#34d399]"
+    case "voided":
+      return "border-2 border-rose-300 bg-rose-50 text-rose-700 dark:border-[#ff7a7a]/60 dark:bg-transparent dark:text-[#ff7a7a]"
+    default:
+      return "border-2 border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-transparent dark:text-slate-400"
+  }
+}
+
+export default function AdminOrderDetailsPage() {
   const params = useParams<{ poNumber: string }>()
+  const router = useRouter()
   const poNumber = typeof params.poNumber === "string" ? decodeURIComponent(params.poNumber) : ""
-  const { vendorId } = useDashboardData()
   const [order, setOrder] = useState<OrderDetails | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!vendorId || !poNumber) {
+    if (!poNumber) {
       return
     }
 
@@ -151,8 +142,14 @@ export default function OrderDetailsPage() {
         setError(null)
 
         const response = await fetch(
-          `/api/orders/details?vendorId=${encodeURIComponent(vendorId)}&poNumber=${encodeURIComponent(poNumber)}`
+          `/api/admin/orders/details?poNumber=${encodeURIComponent(poNumber)}`
         )
+
+        if (response.status === 401) {
+          router.replace("/admin/login")
+          return
+        }
+
         const data = await response.json()
 
         if (!isActive) {
@@ -186,43 +183,7 @@ export default function OrderDetailsPage() {
     return () => {
       isActive = false
     }
-  }, [vendorId, poNumber])
-
-  // Silent re-fetch used to keep the header + Vendor Actions panel in sync after
-  // an acknowledgement from either place.
-  const reloadOrder = useCallback(async () => {
-    if (!vendorId || !poNumber) {
-      return
-    }
-
-    try {
-      const response = await fetch(
-        `/api/orders/details?vendorId=${encodeURIComponent(vendorId)}&poNumber=${encodeURIComponent(poNumber)}`
-      )
-      const data = await response.json()
-
-      if (response.ok && data.success) {
-        setOrder(data.order as OrderDetails)
-      }
-    } catch (reloadError) {
-      console.error(reloadError)
-    }
-  }, [vendorId, poNumber])
-
-  const getStatusClassName = (status?: string | null) => {
-    switch ((status || "").trim().toLowerCase()) {
-      case "open":
-        return "border-2 border-blue-300 bg-blue-50 text-blue-700 dark:border-[#63a3ff]/60 dark:bg-transparent dark:text-[#63a3ff]"
-      case "ap pending":
-        return "border-2 border-amber-300 bg-amber-50 text-amber-700 dark:border-[#ffb020]/60 dark:bg-transparent dark:text-[#ffb020]"
-      case "closed":
-        return "border-2 border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-[#34d399]/60 dark:bg-transparent dark:text-[#34d399]"
-      case "voided":
-        return "border-2 border-rose-300 bg-rose-50 text-rose-700 dark:border-[#ff7a7a]/60 dark:bg-transparent dark:text-[#ff7a7a]"
-      default:
-        return "border-2 border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-transparent dark:text-slate-400"
-    }
-  }
+  }, [poNumber, router])
 
   if (isLoading && !order) {
     return (
@@ -240,7 +201,7 @@ export default function OrderDetailsPage() {
       <section className="rounded-[24px] border border-border/70 bg-card p-8 text-center shadow-[0_18px_40px_rgba(0,0,0,0.16)]">
         <p className="font-medium text-destructive">{error || "Order details not found."}</p>
         <Link
-          href="/dashboard/orders"
+          href="/admin/orders"
           className="mt-4 inline-flex items-center gap-2 text-sm text-primary underline hover:text-[#d36a6a]"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -254,7 +215,7 @@ export default function OrderDetailsPage() {
     <div className="space-y-8">
       <section className="space-y-3">
         <Link
-          href="/dashboard/orders"
+          href="/admin/orders"
           className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -275,26 +236,13 @@ export default function OrderDetailsPage() {
             </span>
           </div>
 
-          <div className="flex items-center gap-6">
-            <OrderAcknowledgeControl
-              vendorId={vendorId}
-              poNumber={poNumber}
-              status={order.header.status}
-              acknowledged={["1", "yes", "true"].includes(
-                order.header.vendorAcknowledged.trim().toLowerCase()
-              )}
-              acknowledgedOn={order.header.vendorAcknowledgedOn}
-              onAcknowledged={reloadOrder}
-            />
-
-            <div className="text-right leading-none">
-              <p className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-muted-foreground">
-                Order Amount
-              </p>
-              <p className="text-[28px] font-bold leading-none tracking-tight text-foreground md:text-[34px]">
-                {formatCurrency(order.header.totalAmount, EMPTY_VALUE)}
-              </p>
-            </div>
+          <div className="text-right leading-none">
+            <p className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-muted-foreground">
+              Order Amount
+            </p>
+            <p className="text-[28px] font-bold leading-none tracking-tight text-foreground md:text-[34px]">
+              {formatCurrency(order.header.totalAmount, EMPTY_VALUE)}
+            </p>
           </div>
         </div>
       </section>
@@ -334,45 +282,40 @@ export default function OrderDetailsPage() {
         />
       </section>
 
-      <OrderNotesComments
-        notes={order.header.notes}
-        initialComments={order.header.vendorComments}
-        vendorId={vendorId}
-        poNumber={poNumber}
-        disabled={["closed", "voided"].includes(order.header.status.trim().toLowerCase())}
-      />
-
-      <OrderStatusActions
-        key={`ack-${order.header.vendorAcknowledged}`}
-        vendorId={vendorId}
-        poNumber={poNumber}
-        orderStatus={order.header.status}
-        onAcknowledged={reloadOrder}
-        initialStatus={{
-          orderPlacedOn: order.header.orderPlacedOn,
-          vendorAcknowledged: order.header.vendorAcknowledged,
-          vendorAcknowledgedBy: order.header.vendorAcknowledgedBy,
-          vendorAcknowledgedOn: order.header.vendorAcknowledgedOn,
-          readyOn: order.header.readyOn,
-          orderShippedDate: order.header.orderShippedDate,
-          estArrivalDate: order.header.dateScheduled,
-          receivedDate: order.header.dateReceived,
-          trackingNo: order.header.trackingNo,
-          vendorInvoiceNo: order.header.vendorInvoiceNo,
-        }}
-      />
+      <section className="overflow-hidden rounded-[24px] border border-border/70 bg-card shadow-[0_18px_36px_rgba(0,0,0,0.22)]">
+        <div className="border-b border-border/70 px-6 py-5">
+          <div className="flex items-center gap-3">
+            <span className="h-8 w-1 rounded-full bg-primary" />
+            <h2 className="text-[18px] font-semibold tracking-tight text-foreground">Notes & Vendor Comments</h2>
+          </div>
+        </div>
+        <div className="grid gap-6 p-6 md:grid-cols-2">
+          <div>
+            <p className="mb-2 text-[12px] font-bold uppercase tracking-[0.2em] text-muted-foreground">Notes</p>
+            <p className="whitespace-pre-line text-[15px] text-foreground">
+              {order.header.notes || EMPTY_VALUE}
+            </p>
+          </div>
+          <div>
+            <p className="mb-2 text-[12px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+              Vendor Comments
+            </p>
+            <p className="whitespace-pre-line text-[15px] text-foreground">
+              {order.header.vendorComments || EMPTY_VALUE}
+            </p>
+          </div>
+        </div>
+      </section>
 
       <section className="overflow-hidden rounded-[24px] border border-border/70 bg-card shadow-[0_18px_36px_rgba(0,0,0,0.22)]">
         <div className="border-b border-border/70 px-6 py-5">
           <div className="flex items-center gap-3">
             <span className="h-8 w-1 rounded-full bg-primary" />
-            <h2 className="text-[18px] font-semibold tracking-tight text-foreground">
-              Line Items
-            </h2>
+            <h2 className="text-[18px] font-semibold tracking-tight text-foreground">Line Items</h2>
           </div>
         </div>
 
-        <div className="overflow-hidden hide-scrollbar">
+        <div className="overflow-x-auto hide-scrollbar">
           <table className="w-full min-w-[980px] text-left">
             <thead className="border-y border-border/70 bg-muted text-[11px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
               <tr>
@@ -440,15 +383,29 @@ export default function OrderDetailsPage() {
         </div>
       </section>
 
-      <OrderDocumentsTabs
-        vendorId={vendorId}
-        poNumber={poNumber}
-        disabled={["closed", "voided"].includes(order.header.status.trim().toLowerCase())}
-        lineItems={order.lineItems.map((item) => ({
-          itemNo: item.itemNo,
-          productName: item.productName,
-        }))}
-      />
+      <section className="overflow-hidden rounded-[24px] border border-border/70 bg-card shadow-[0_18px_36px_rgba(0,0,0,0.22)]">
+        <div className="border-b border-border/70 px-6 py-5">
+          <div className="flex items-center gap-3">
+            <span className="h-8 w-1 rounded-full bg-primary" />
+            <h2 className="text-[18px] font-semibold tracking-tight text-foreground">Documents</h2>
+          </div>
+        </div>
+        <div className="p-6">
+          <AdminOrderDocumentsPanel poNumber={poNumber} />
+        </div>
+      </section>
+
+      <section className="overflow-hidden rounded-[24px] border border-border/70 bg-card shadow-[0_18px_36px_rgba(0,0,0,0.22)]">
+        <div className="border-b border-border/70 px-6 py-5">
+          <div className="flex items-center gap-3">
+            <span className="h-8 w-1 rounded-full bg-primary" />
+            <h2 className="text-[18px] font-semibold tracking-tight text-foreground">Specification Sheets</h2>
+          </div>
+        </div>
+        <div className="p-6">
+          <AdminOrderSpecSheets poNumber={poNumber} />
+        </div>
+      </section>
     </div>
   )
 }

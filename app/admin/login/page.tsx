@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { PortalBrand } from "@/components/portal-brand"
 
-export default function LoginPage() {
+export default function AdminLoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -40,7 +40,7 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch("/api/admin/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -54,21 +54,7 @@ export default function LoginPage() {
         return
       }
 
-      if (typeof window !== "undefined") {
-        if (data?.vendor?.vendorId) {
-          window.localStorage.setItem("vendorId", String(data.vendor.vendorId))
-        }
-
-        if (data?.vendor?.name) {
-          window.localStorage.setItem("vendorName", String(data.vendor.name))
-        }
-
-        if (data?.vendor?.driveFolderId) {
-          window.localStorage.setItem("vendorDriveFolderId", String(data.vendor.driveFolderId))
-        }
-      }
-
-      router.replace("/dashboard")
+      router.replace("/admin")
     } catch {
       setError("Failed to connect to the authentication server.")
       setIsLoading(false)
@@ -84,9 +70,9 @@ export default function LoginPage() {
             logoClassName="h-16 w-36 sm:h-18 sm:w-40"
           />
           <h2 className="text-[1.9rem] font-extrabold leading-none tracking-tight text-primary [font-family:var(--font-portal-brand),var(--font-sans),sans-serif] sm:text-[2.2rem]">
-            Vendor Portal
+            Admin Login
           </h2>
-          <p className="text-sm text-muted-foreground">Sign in to your account</p>
+          <p className="text-sm text-muted-foreground">Sign in to view all vendor orders</p>
         </div>
 
         <form onSubmit={handleSubmit} className="mt-8 space-y-6" autoComplete="off">
@@ -102,7 +88,7 @@ export default function LoginPage() {
               <Input
                 ref={emailRef}
                 id="email"
-                name="portal-email"
+                name="admin-email"
                 type="email"
                 placeholder="name@example.com"
                 value={email}
@@ -118,7 +104,7 @@ export default function LoginPage() {
               <Input
                 ref={passwordRef}
                 id="password"
-                name="portal-password"
+                name="admin-password"
                 type="password"
                 placeholder="••••••••"
                 value={password}
@@ -141,12 +127,12 @@ export default function LoginPage() {
         </form>
 
         <p className="text-center text-sm text-muted-foreground">
-          Are you an admin?{" "}
+          Are you a vendor?{" "}
           <Link
-            href="/admin/login"
+            href="/login"
             className="font-medium text-primary transition-colors hover:text-primary/90 hover:underline"
           >
-            Sign in as Admin
+            Sign in as Vendor
           </Link>
         </p>
       </div>

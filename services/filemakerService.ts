@@ -9,6 +9,7 @@ import { FILEMAKER_LAYOUTS } from '@/config/filemaker';
 let cachedToken: string | null = null;
 
 type PurchaseOrderRecord = {
+  vendorId: string;
   poNumber: string;
   poNumberDisplay: string;
   orderPlacedBy: string;
@@ -112,6 +113,10 @@ type FileMakerFindResponse = {
 type PurchaseOrderQueryOptions = {
   status?: string;
   poNumber?: string;
+  /** M/D/YYYY (FileMaker date format). When set, only orders entered on/after this date are matched. */
+  dateFrom?: string;
+  /** M/D/YYYY (FileMaker date format). When set, only orders entered on/before this date are matched. */
+  dateTo?: string;
 };
 
 /**
@@ -325,6 +330,7 @@ const fetchFM = async (
 };
 
 const mapPurchaseOrderRecord = (fieldData: Record<string, unknown>): PurchaseOrderRecord => ({
+  vendorId: normalizeFieldValue(fieldData.VendorID),
   poNumber: normalizeFieldValue(fieldData.PONumber),
   // Display-only versioned PO number (PONumber_new). The internal key stays `poNumber`.
   poNumberDisplay: normalizeFieldValue(fieldData.PONumber_new),
@@ -1106,5 +1112,450 @@ export const getDashboardSummary = async (vendorId: string): Promise<DashboardSu
     },
     recentOrders: purchaseOrders.slice(0, 5),
     sales: buildSalesSummary(purchaseOrders),
+  };
+};
+
+/* ------------------------------------------------------------------ */
+/* Admin (read-only, cross-vendor) queries                            */
+/* Mirror the vendor-scoped functions above but without a VendorID     */
+/* filter. None of the functions above are modified by this section.  */
+/* ------------------------------------------------------------------ */
+
+export type PurchaseOrderRecordWithVendor = PurchaseOrderRecord & { vendorName: string };
+
+/**
+ * Same as getVendorPOs, but returns purchase orders across every vendor. The
+ * search term matches either the PO number or the vendor's name (Web_PO only
+ * stores VendorID, not the name, so matching vendors are resolved via
+ * getVendorNameMap and OR'd in as additional query criteria — FileMaker's
+ * _find treats each entry in `query` as an OR'd alternative).
+ */
+export const getAllPOs = async (
+  page = 1,
+  pageSize = 10,
+  options: PurchaseOrderQueryOptions = {}
+): Promise<PagedPurchaseOrders> => {
+  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+  const safePageSize = Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : 10;
+  const offset = (safePage - 1) * safePageSize + 1;
+
+  const baseCriteria: Record<string, string> = {
+    // Only the latest version of each PO is listed/searched.
+    LatestPOVersion: `==1`,
+  };
+
+  if (options.status && options.status !== "All") {
+    baseCriteria.Status = `=="${options.status}"`;
+  }
+
+  if (options.dateFrom && options.dateTo) {
+    baseCriteria.DateEntered = `${options.dateFrom}...${options.dateTo}`;
+  } else if (options.dateFrom) {
+    baseCriteria.DateEntered = `>=${options.dateFrom}`;
+  } else if (options.dateTo) {
+    baseCriteria.DateEntered = `<=${options.dateTo}`;
+  }
+
+  const searchTerm = normalizeFieldValue(options.poNumber);
+  let queryEntries: Record<string, string>[] = [baseCriteria];
+
+  if (searchTerm) {
+    queryEntries = [{ ...baseCriteria, PONumber_new: `*${searchTerm}*` }];
+
+    const lowerSearchTerm = searchTerm.toLowerCase();
+    const vendorNameMap = await getVendorNameMap();
+    const matchingVendorIds = Array.from(vendorNameMap.entries())
+      .filter(([, name]) => name.toLowerCase().includes(lowerSearchTerm))
+      .map(([id]) => id)
+      .slice(0, 25);
+
+    matchingVendorIds.forEach((vendorId) => {
+      queryEntries.push({ ...baseCriteria, VendorID: `=="${vendorId}"` });
+    });
+  }
+
+  const payload = {
+    query: queryEntries,
+    sort: [{ fieldName: 'DateEntered', sortOrder: 'descend' }],
+    limit: safePageSize,
+    offset,
+  };
+
+  try {
+    const response = await fetchFM(FILEMAKER_LAYOUTS.purchaseOrders, 'POST', payload);
+    if (!response.data) {
+      return {
+        orders: [],
+        page: safePage,
+        pageSize: safePageSize,
+        totalCount: 0,
+        hasNextPage: false,
+      };
+    }
+
+    const orders = response.data.map((record: { fieldData?: Record<string, unknown> }): PurchaseOrderRecord => {
+      const fieldData = record.fieldData ?? {};
+      return mapPurchaseOrderRecord(fieldData);
+    });
+    const dataInfo = (response as { dataInfo?: Record<string, unknown> }).dataInfo ?? {};
+    const totalCount = Number(
+      normalizeFieldValue(dataInfo.foundCount ?? dataInfo.totalRecordCount ?? dataInfo.returnedCount)
+    );
+    const resolvedTotalCount = Number.isFinite(totalCount) && totalCount >= 0 ? totalCount : 0;
+
+    return {
+      orders,
+      page: safePage,
+      pageSize: safePageSize,
+      totalCount: resolvedTotalCount,
+      hasNextPage:
+        resolvedTotalCount > 0
+          ? safePage * safePageSize < resolvedTotalCount
+          : orders.length === safePageSize,
+    };
+  } catch (error: unknown) {
+    if (getErrorMessage(error).includes('401')) {
+      return {
+        orders: [],
+        page: safePage,
+        pageSize: safePageSize,
+        totalCount: 0,
+        hasNextPage: false,
+      };
+    }
+    throw error;
+  }
+};
+
+/**
+ * Fast count of latest-version POs matching a status, without downloading the
+ * matching records. FileMaker's _find response reports the match count
+ * (dataInfo.foundCount) regardless of the requested `limit`, so limit:1 is
+ * enough to get an accurate count almost for free.
+ */
+const countPOsByStatus = async (status: string): Promise<number> => {
+  const payload = {
+    query: [
+      {
+        Status: `=="${status}"`,
+        LatestPOVersion: `==1`,
+      },
+    ],
+    limit: 1,
+  };
+
+  try {
+    const response = await fetchFM(FILEMAKER_LAYOUTS.purchaseOrders, 'POST', payload);
+    const dataInfo = (response as { dataInfo?: Record<string, unknown> }).dataInfo ?? {};
+    const count = Number(normalizeFieldValue(dataInfo.foundCount ?? dataInfo.totalRecordCount));
+    return Number.isFinite(count) && count >= 0 ? count : 0;
+  } catch (error: unknown) {
+    if (getErrorMessage(error).includes('401')) return 0;
+    throw error;
+  }
+};
+
+/**
+ * Same as getVendorPOByNumber, but not scoped to a single vendor.
+ */
+export const getPOByNumberAdmin = async (poNumber: string): Promise<PurchaseOrderRecord | null> => {
+  const payload = {
+    query: [
+      { PONumber: `=="${poNumber}"` }
+    ],
+    limit: 1
+  };
+
+  try {
+    const response = await fetchFM(FILEMAKER_LAYOUTS.purchaseOrders, 'POST', payload);
+    if (!response.data || response.data.length === 0) {
+      return null;
+    }
+
+    const fieldData: Record<string, unknown> = response.data[0].fieldData ?? {};
+    return mapPurchaseOrderRecord(fieldData);
+  } catch (error: unknown) {
+    if (getErrorMessage(error).includes('401')) return null;
+    throw error;
+  }
+};
+
+/**
+ * Builds a ContactID -> vendor name map from Web_Contacts, used to attach a
+ * readable vendor name onto PO records for the admin views (PO records only
+ * carry the vendor's ID, not its name). Cached in-memory for a few minutes
+ * since the vendor list rarely changes and both the admin dashboard and the
+ * orders list need it on every navigation.
+ */
+let vendorNameMapCache: { map: Map<string, string>; expiresAt: number } | null = null;
+const VENDOR_NAME_MAP_TTL_MS = 5 * 60 * 1000;
+
+export const getVendorNameMap = async (): Promise<Map<string, string>> => {
+  if (vendorNameMapCache && vendorNameMapCache.expiresAt > Date.now()) {
+    return vendorNameMapCache.map;
+  }
+
+  const payload = {
+    query: [
+      { ContactType: `=="Vendor"` }
+    ],
+    limit: 1000,
+  };
+
+  const map = new Map<string, string>();
+
+  try {
+    const response = await fetchFM(FILEMAKER_LAYOUTS.vendors, 'POST', payload);
+    (response.data ?? []).forEach((record: { fieldData?: Record<string, unknown> }) => {
+      const fieldData = record.fieldData ?? {};
+      const id = normalizeFieldValue(fieldData.ContactID);
+      if (id) {
+        map.set(id, pickFieldValue(fieldData, ['ContactName']));
+      }
+    });
+    vendorNameMapCache = { map, expiresAt: Date.now() + VENDOR_NAME_MAP_TTL_MS };
+    return map;
+  } catch (error: unknown) {
+    if (getErrorMessage(error).includes('401')) return map;
+    throw error;
+  }
+};
+
+const attachVendorNames = <T extends { vendorId: string }>(
+  orders: T[],
+  vendorNameMap: Map<string, string>
+): Array<T & { vendorName: string }> =>
+  orders.map((order) => ({ ...order, vendorName: vendorNameMap.get(order.vendorId) || '' }));
+
+/**
+ * Paged PO list across all vendors, with each row's vendor name attached.
+ */
+export const getAllPOsWithVendorNames = async (
+  page = 1,
+  pageSize = 10,
+  options: PurchaseOrderQueryOptions = {}
+): Promise<{
+  orders: PurchaseOrderRecordWithVendor[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  hasNextPage: boolean;
+}> => {
+  const [paged, vendorNameMap] = await Promise.all([
+    getAllPOs(page, pageSize, options),
+    getVendorNameMap(),
+  ]);
+
+  return {
+    ...paged,
+    orders: attachVendorNames(paged.orders, vendorNameMap),
+  };
+};
+
+/** Pages through every (latest-version) PO matching the given options. */
+const getAllPOsUnpaged = async (options: PurchaseOrderQueryOptions = {}): Promise<PurchaseOrderRecord[]> => {
+  const pageSize = 1000;
+  let page = 1;
+  const allOrders: PurchaseOrderRecord[] = [];
+
+  while (true) {
+    const pagedOrders = await getAllPOs(page, pageSize, options);
+    allOrders.push(...pagedOrders.orders);
+
+    if (!pagedOrders.hasNextPage) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return allOrders;
+};
+
+const toFileMakerDateFromParts = (date: Date): string =>
+  `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+
+const monthsBetween = (from: Date, to: Date): number =>
+  (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth()) + 1;
+
+/**
+ * Builds a sales series bucketed by month or year across an arbitrary date
+ * range (unlike buildSalesSummary above, which is hardcoded to a trailing
+ * 12-month window plus all-history-by-year — fine for a single vendor's
+ * small order count, too slow to compute unbounded for every vendor).
+ */
+const buildSalesSeries = (
+  orders: PurchaseOrderRecord[],
+  from: Date,
+  to: Date,
+  granularity: 'month' | 'year'
+): SalesPoint[] => {
+  const totals = new Map<string, number>();
+
+  if (granularity === 'month') {
+    const cursor = new Date(from.getFullYear(), from.getMonth(), 1);
+    const end = new Date(to.getFullYear(), to.getMonth(), 1);
+    while (cursor <= end) {
+      totals.set(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`, 0);
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+  } else {
+    for (let year = from.getFullYear(); year <= to.getFullYear(); year += 1) {
+      totals.set(String(year), 0);
+    }
+  }
+
+  orders.forEach((order) => {
+    const salesDate = getOrderSalesDate(order);
+    if (!salesDate) {
+      return;
+    }
+
+    const amount = parseAmount(order.totalAmount);
+    const key =
+      granularity === 'month'
+        ? `${salesDate.getFullYear()}-${String(salesDate.getMonth() + 1).padStart(2, '0')}`
+        : String(salesDate.getFullYear());
+
+    if (totals.has(key)) {
+      totals.set(key, (totals.get(key) ?? 0) + amount);
+    }
+  });
+
+  return Array.from(totals.entries()).map(([key, total]) => {
+    if (granularity === 'month') {
+      const [yearValue, monthValue] = key.split('-');
+      const monthIndex = Number(monthValue) - 1;
+      return { label: `${MONTH_NAMES[monthIndex]} ${yearValue.slice(-2)}`, total: Number(total.toFixed(2)) };
+    }
+    return { label: key, total: Number(total.toFixed(2)) };
+  });
+};
+
+export type AdminDashboardRange = {
+  /** ISO date (YYYY-MM-DD). Defaults to Jan 1 of the current year. */
+  from?: string;
+  /** ISO date (YYYY-MM-DD). Defaults to today. */
+  to?: string;
+};
+
+/**
+ * Counts are computed via cheap foundCount-only queries (no record download)
+ * and are always current, regardless of the requested sales range. The sales
+ * chart is bounded to the caller's requested date range instead of unbounded
+ * history, so the dashboard never has to page through the entire multi-year
+ * order history just to sum totals. Bucketing is monthly for ranges up to 2
+ * years, yearly beyond that.
+ */
+export const getAdminDashboardSummary = async (
+  range: AdminDashboardRange = {}
+): Promise<{
+  counts: { activeOrders: number; pendingInvoices: number; closedOrders: number };
+  recentOrders: PurchaseOrderRecordWithVendor[];
+  sales: SalesPoint[];
+  range: { from: string; to: string; granularity: 'month' | 'year' };
+}> => {
+  const now = new Date();
+  const parsedFrom = range.from ? new Date(range.from) : new Date(now.getFullYear(), 0, 1);
+  const parsedTo = range.to ? new Date(range.to) : now;
+
+  const from = Number.isNaN(parsedFrom.getTime()) ? new Date(now.getFullYear(), 0, 1) : parsedFrom;
+  const to = Number.isNaN(parsedTo.getTime()) || parsedTo < from ? now : parsedTo;
+  const granularity: 'month' | 'year' = monthsBetween(from, to) <= 24 ? 'month' : 'year';
+
+  const [activeOrders, pendingInvoices, closedOrders, recent, rangeOrders, vendorNameMap] = await Promise.all([
+    countPOsByStatus('Open'),
+    countPOsByStatus('AP Pending'),
+    countPOsByStatus('Closed'),
+    getAllPOs(1, 5),
+    getAllPOsUnpaged({ dateFrom: toFileMakerDateFromParts(from), dateTo: toFileMakerDateFromParts(to) }),
+    getVendorNameMap(),
+  ]);
+
+  return {
+    counts: {
+      activeOrders,
+      pendingInvoices,
+      closedOrders,
+    },
+    recentOrders: attachVendorNames(recent.orders, vendorNameMap),
+    sales: buildSalesSeries(rangeOrders, from, to, granularity),
+    range: {
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+      granularity,
+    },
+  };
+};
+
+/**
+ * Same as getPurchaseOrderDetails, but not scoped to a single vendor.
+ */
+export const getPurchaseOrderDetailsAdmin = async (poNumber: string): Promise<PurchaseOrderDetails | null> => {
+  const [header, lineItems] = await Promise.all([
+    getPOByNumberAdmin(poNumber),
+    getPurchaseOrderLineItems(poNumber),
+  ]);
+
+  if (!header) {
+    return null;
+  }
+
+  return {
+    header,
+    lineItems,
+  };
+};
+
+export type CompanyProfile = {
+  companyName: string;
+  phone: string;
+  email: string;
+  website: string;
+  address: string;
+};
+
+/**
+ * Fetches the single company-profile record (there is only one) from the
+ * CPR_Web layout. Uses the plain /records endpoint (like getVendorDetails)
+ * since there's no search criteria to _find on.
+ */
+export const getCompanyProfile = async (): Promise<CompanyProfile | null> => {
+  let token = await getAuthToken();
+  const url = `${getBaseUrl()}/layouts/${encodeURIComponent(FILEMAKER_LAYOUTS.companyProfile)}/records?_limit=1`;
+
+  const doFetch = async (currentToken: string) =>
+    fetch(url, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${currentToken}` },
+      cache: 'no-store',
+    });
+
+  let response = await doFetch(token);
+
+  if (response.status === 401) {
+    token = await getAuthToken(true);
+    response = await doFetch(token);
+  }
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(`FileMaker API Error: ${response.status} - ${data.messages?.[0]?.message || 'Failed to get company profile'}`);
+  }
+
+  const records = data.response?.data as Array<{ fieldData?: Record<string, unknown> }> | undefined;
+  if (!records || records.length === 0) {
+    return null;
+  }
+
+  const fieldData = records[0].fieldData ?? {};
+
+  return {
+    companyName: normalizeFieldValue(fieldData.CenterName),
+    phone: normalizeFieldValue(fieldData.Phone),
+    email: normalizeFieldValue(fieldData.EmailAddress),
+    website: normalizeFieldValue(fieldData['Cpr_COM__CompanyNo::Web Site']),
+    address: normalizeFieldValue(fieldData.AddressBlock),
   };
 };

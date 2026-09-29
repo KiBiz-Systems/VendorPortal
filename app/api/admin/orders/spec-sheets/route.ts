@@ -1,0 +1,31 @@
+import { NextResponse } from "next/server"
+import { isAdminAuthenticated } from "@/lib/adminSession"
+import { getOrderSpecSheets } from "@/services/filemakerService"
+
+export async function GET(request: Request) {
+  if (!(await isAdminAuthenticated())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  try {
+    const { searchParams } = new URL(request.url)
+    const poNumber = searchParams.get("poNumber")
+
+    if (!poNumber) {
+      return NextResponse.json(
+        { error: "PO number is required" },
+        { status: 400 }
+      )
+    }
+
+    const specSheets = await getOrderSpecSheets(poNumber)
+
+    return NextResponse.json({ success: true, specSheets }, { status: 200 })
+  } catch (error: unknown) {
+    console.error("Admin Order Spec Sheets API Error:", error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to fetch specification sheets" },
+      { status: 500 }
+    )
+  }
+}

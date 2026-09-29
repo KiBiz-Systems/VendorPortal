@@ -3,36 +3,41 @@
 import { useEffect, useRef, useState } from "react"
 import { ChevronLeft, ChevronRight, Filter, Loader2 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useDashboardData } from "../dashboard-data-context"
 import { formatCurrency } from "@/lib/format"
 
 const statusTabs = ["All", "Open", "Closed", "AP Pending"]
 const EMPTY_VALUE = "--"
 const UNKNOWN_STATUS = "Unknown"
 
-export default function OrdersPage() {
-  const {
-    vendorId,
-    orders,
-    ordersLoading,
-    ordersError,
-    ordersPage,
-    ordersPageSize,
-    ordersHasNextPage,
-    ordersTotalCount,
-    loadOrders,
-  } = useDashboardData()
+type AdminOrder = {
+  poNumber: string
+  poNumberDisplay: string
+  vendorName: string
+  dateEntered: string
+  dateScheduled: string
+  dateReceived: string
+  paymentDate: string
+  totalAmount: string
+  status: string
+}
+
+export default function AdminOrdersPage() {
   const router = useRouter()
-  const isLoading = ordersLoading
-  const error = ordersError
-  const hasSeededOrdersRef = useRef(false)
+  const [orders, setOrders] = useState<AdminOrder[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [ordersPage, setOrdersPage] = useState(1)
+  const [ordersHasNextPage, setOrdersHasNextPage] = useState(false)
+  const [ordersTotalCount, setOrdersTotalCount] = useState(0)
+  const pageSize = 10
+
+  const hasSeededRef = useRef(false)
   const [activeStatus, setActiveStatus] = useState("Open")
   const [searchDraft, setSearchDraft] = useState("")
   const [committedSearch, setCommittedSearch] = useState("")
   const [pageWindowStart, setPageWindowStart] = useState(1)
 
   const currentPage = ordersPage || 1
-  const pageSize = ordersPageSize || 10
   const totalPages =
     ordersTotalCount > 0
       ? Math.max(1, Math.ceil(ordersTotalCount / pageSize))
@@ -42,27 +47,62 @@ export default function OrdersPage() {
 
   const normalizeStatus = (status: string) => (status === "All" ? undefined : status)
 
-  const loadFilteredOrders = (page: number, status = activeStatus, search = committedSearch) => {
-    if (!vendorId) {
-      return
+  const loadOrders = async (
+    page: number,
+    status = activeStatus,
+    search = committedSearch
+  ) => {
+    try {
+      setIsLoading(true)
+      setError(null)
+
+      const trimmedSearch = search.trim()
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+      const resolvedStatus = normalizeStatus(status)
+      if (resolvedStatus) {
+        params.set("status", resolvedStatus)
+      }
+      if (trimmedSearch) {
+        params.set("poNumber", trimmedSearch)
+      }
+
+      const response = await fetch(`/api/admin/orders?${params.toString()}`)
+
+      if (response.status === 401) {
+        router.replace("/admin/login")
+        return
+      }
+
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setOrders(data.orders ?? [])
+        setOrdersPage(data.page ?? page)
+        setOrdersHasNextPage(Boolean(data.hasNextPage))
+        setOrdersTotalCount(data.totalCount ?? 0)
+        return
+      }
+
+      setError(data.error || "Failed to load purchase orders")
+    } catch (loadError) {
+      console.error(loadError)
+      setError("An unexpected error occurred")
+    } finally {
+      setIsLoading(false)
     }
+  }
 
-    const trimmedSearch = search.trim()
-
-    void loadOrders(vendorId, page, pageSize, {
-      status: trimmedSearch ? undefined : normalizeStatus(status),
-      poNumber: trimmedSearch || undefined,
-    })
+  const loadFilteredOrders = (page: number, status = activeStatus, search = committedSearch) => {
+    void loadOrders(page, status, search)
   }
 
   useEffect(() => {
-    if (vendorId && !hasSeededOrdersRef.current) {
-      hasSeededOrdersRef.current = true
+    if (!hasSeededRef.current) {
+      hasSeededRef.current = true
       loadFilteredOrders(1, "Open", "")
     }
-    // Intentionally seed only once per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vendorId])
+  }, [])
 
   const getStatusColor = (status?: string | null) => {
     switch ((status || "").trim().toLowerCase()) {
@@ -88,7 +128,7 @@ export default function OrdersPage() {
               <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Search by PO number..."
+                placeholder="Search by PO number or vendor..."
                 className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
                 value={searchDraft}
                 onChange={(event) => setSearchDraft(event.target.value)}
@@ -117,11 +157,9 @@ export default function OrdersPage() {
                   key={tab}
                   type="button"
                   onClick={() => {
-                    setSearchDraft("")
-                    setCommittedSearch("")
                     setActiveStatus(tab)
                     setPageWindowStart(1)
-                    loadFilteredOrders(1, tab, "")
+                    loadFilteredOrders(1, tab, committedSearch)
                   }}
                   className={
                     activeStatus === tab
@@ -138,17 +176,17 @@ export default function OrdersPage() {
       </section>
 
       <section className="overflow-hidden rounded-[24px] border border-border/70 bg-card shadow-[0_18px_40px_rgba(0,0,0,0.16)]">
-        <div className="overflow-hidden hide-scrollbar">
-          <table className="w-full min-w-[1200px] text-left">
+        <div className="overflow-x-auto hide-scrollbar">
+          <table className="w-full min-w-[900px] table-fixed text-left">
             <thead className="border-b border-border/70 bg-muted text-[11px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
               <tr>
-                <th className="px-5 py-4 md:px-7">PO NUMBER</th>
-                <th className="px-5 py-4">DATE ENTERED</th>
-                <th className="px-5 py-4">EST. SHIP DATE</th>
-                <th className="px-5 py-4">DATE RECEIVED</th>
-                <th className="px-5 py-4">PAYMENT DATE</th>
-                <th className="px-5 py-4">TOTAL AMOUNT</th>
-                <th className="px-5 py-4">STATUS</th>
+                <th className="w-[9%] px-5 py-4 md:px-7">PO NUMBER</th>
+                <th className="w-[20%] px-5 py-4">VENDOR</th>
+                <th className="w-[11%] px-5 py-4">DATE ENTERED</th>
+                <th className="w-[11%] px-5 py-4">EST. SHIP DATE</th>
+                <th className="w-[11%] px-5 py-4">DATE RECEIVED</th>
+                <th className="w-[14%] px-5 py-4">TOTAL AMOUNT</th>
+                <th className="w-[24%] px-5 py-4 text-center">STATUS</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/70">
@@ -190,16 +228,19 @@ export default function OrdersPage() {
                       className="cursor-pointer transition-colors hover:bg-muted/70"
                       role="link"
                       tabIndex={0}
-                      onClick={() => router.push(`/dashboard/orders/${encodeURIComponent(order.poNumber)}`)}
+                      onClick={() => router.push(`/admin/orders/${encodeURIComponent(order.poNumber)}`)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault()
-                          router.push(`/dashboard/orders/${encodeURIComponent(order.poNumber)}`)
+                          router.push(`/admin/orders/${encodeURIComponent(order.poNumber)}`)
                         }
                       }}
                     >
-                      <td className="px-5 py-5 text-[15px] font-bold text-primary md:px-7">
+                      <td className="truncate px-5 py-5 text-[15px] font-bold text-primary md:px-7">
                         {order.poNumberDisplay || EMPTY_VALUE}
+                      </td>
+                      <td className="truncate px-5 py-5 text-[14px] text-foreground">
+                        {order.vendorName || EMPTY_VALUE}
                       </td>
                       <td className="whitespace-nowrap px-5 py-5 text-[14px] text-foreground">
                         {order.dateEntered || EMPTY_VALUE}
@@ -210,15 +251,12 @@ export default function OrdersPage() {
                       <td className="whitespace-nowrap px-5 py-5 text-[14px] text-muted-foreground">
                         {order.dateReceived || EMPTY_VALUE}
                       </td>
-                      <td className="whitespace-nowrap px-5 py-5 text-[14px] text-muted-foreground">
-                        {order.paymentDate || EMPTY_VALUE}
-                      </td>
                       <td className="whitespace-nowrap px-5 py-5 text-[15px] font-bold text-foreground">
                         {formatCurrency(order.totalAmount, EMPTY_VALUE)}
                       </td>
-                      <td className="px-5 py-5">
+                      <td className="px-5 py-5 text-center">
                         <span
-                          className={`inline-flex items-center rounded-full px-3 py-1 text-[12px] font-semibold ${getStatusColor(order.status)}`}
+                          className={`inline-flex items-center whitespace-nowrap rounded-full px-3 py-1 text-[12px] font-semibold ${getStatusColor(order.status)}`}
                         >
                           {order.status || UNKNOWN_STATUS}
                         </span>
@@ -242,9 +280,9 @@ export default function OrdersPage() {
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                disabled={ordersLoading || pageWindowStart <= 1}
+                disabled={isLoading || pageWindowStart <= 1}
                 onClick={() => {
-                  if (vendorId && pageWindowStart > 1) {
+                  if (pageWindowStart > 1) {
                     const previousWindowStart = Math.max(1, pageWindowStart - 3)
                     setPageWindowStart(previousWindowStart)
                     loadFilteredOrders(previousWindowStart, activeStatus, committedSearch)
@@ -261,9 +299,9 @@ export default function OrdersPage() {
                   <button
                     key={pageNumber}
                     type="button"
-                    disabled={ordersLoading}
+                    disabled={isLoading}
                     onClick={() => {
-                      if (vendorId && pageNumber !== currentPage) {
+                      if (pageNumber !== currentPage) {
                         loadFilteredOrders(pageNumber, activeStatus, committedSearch)
                       }
                     }}
@@ -281,9 +319,9 @@ export default function OrdersPage() {
 
               <button
                 type="button"
-                disabled={ordersLoading || !ordersHasNextPage}
+                disabled={isLoading || !ordersHasNextPage}
                 onClick={() => {
-                  if (vendorId && ordersHasNextPage) {
+                  if (ordersHasNextPage) {
                     const nextWindowStart = pageWindowStart <= 1 ? 4 : pageWindowStart + 3
                     setPageWindowStart(nextWindowStart)
                     loadFilteredOrders(nextWindowStart, activeStatus, committedSearch)
