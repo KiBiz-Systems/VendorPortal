@@ -47,3 +47,9 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+graphify-out/
+temp/
+tmp/
+.agentic/install-state.json
+.agentic/memory/
+.agentic/config.json

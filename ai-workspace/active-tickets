@@ -1,0 +1,7 @@
+# One row per in-flight ticket. Rewritten whole on every status change, never appended.
+# A COMPLETED ticket's row is DELETED — the ticket file is the record; this is only an index.
+# Nothing here that is not already in that ticket's resume header.
+
+| Ticket | Path | Status | Current subtask | Claimed files |
+|--------|------|--------|-----------------|---------------|
+| — | — | no tickets in flight | — | — |

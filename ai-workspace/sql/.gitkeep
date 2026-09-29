@@ -1,0 +1,5 @@
+SQL scripts for developer review, numbered sequentially: NNN_description.sql
+
+The agent writes them here and requests manual execution. It never runs them against a
+real database. See .agents/rules/database.md — a bug that has already corrupted stored
+data needs both a code fix and a data-correction script.

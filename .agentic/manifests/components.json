@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    { "id": "base-workflow", "profiles": ["minimal", "core", "strict"], "requiresConsent": false },
+    { "id": "graphify-mcp", "profiles": ["core", "strict"], "requiresConsent": false },
+    { "id": "review", "profiles": ["strict"], "requiresConsent": false },
+    { "id": "security-scan", "profiles": ["strict"], "requiresConsent": false },
+    { "id": "hooks", "profiles": ["strict"], "requiresConsent": true },
+    { "id": "memory", "profiles": ["core", "strict"], "requiresConsent": false }
+  ]
+}

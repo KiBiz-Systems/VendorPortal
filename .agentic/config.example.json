@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "profile": "strict",
+  "hooks": {
+    "enabled": ["ticket-state", "secret-warning", "validation-reminder"],
+    "graphify": "warn",
+    "validation": "remind"
+  }
+}

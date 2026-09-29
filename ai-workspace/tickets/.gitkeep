@@ -1,0 +1,3 @@
+Tickets live here as T-NNN-slug.md, created from .agents/templates/TICKET_TEMPLATE.md.
+One file per task — it carries the plan, subtasks, agent assignments, test cases, and
+decisions. No separate plan, log, or test-scenario files.

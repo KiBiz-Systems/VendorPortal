@@ -1,0 +1,6 @@
+One doc per endpoint: NNN_description.md
+
+Each covers request body, path params, query params, headers, response shape (success and
+error), validation rules, and flow notes where the behavior is non-obvious.
+
+A contract that exists only in code is a contract the client will guess at.
