@@ -110,6 +110,9 @@ type FileMakerFindResponse = {
   dataInfo?: Record<string, unknown>;
 };
 
+/** Pseudo-status: filters on IsDocNeedAttention == 1 instead of the Status field. */
+export const PENDING_DOCS_STATUS = "PendingDocs";
+
 type PurchaseOrderQueryOptions = {
   status?: string;
   poNumber?: string;
@@ -452,7 +455,9 @@ export const getVendorPOs = async (
     LatestPOVersion: `==1`,
   };
 
-  if (options.status && options.status !== "All") {
+  if (options.status === PENDING_DOCS_STATUS) {
+    query.IsDocNeedAttention = `==1`;
+  } else if (options.status && options.status !== "All") {
     query.Status = `=="${options.status}"`;
   }
 
@@ -1144,7 +1149,9 @@ export const getAllPOs = async (
     LatestPOVersion: `==1`,
   };
 
-  if (options.status && options.status !== "All") {
+  if (options.status === PENDING_DOCS_STATUS) {
+    baseCriteria.IsDocNeedAttention = `==1`;
+  } else if (options.status && options.status !== "All") {
     baseCriteria.Status = `=="${options.status}"`;
   }
 
