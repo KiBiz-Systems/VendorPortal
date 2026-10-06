@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, Filter, Loader2 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/format"
 
-const statusTabs = ["All", "Open", "Closed", "AP Pending"]
+const statusTabs = ["All", "Open", "Closed", "AP Pending", "PendingDocs"]
 const EMPTY_VALUE = "--"
 const UNKNOWN_STATUS = "Unknown"
 
