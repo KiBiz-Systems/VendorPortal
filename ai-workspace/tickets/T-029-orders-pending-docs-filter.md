@@ -1,10 +1,10 @@
 # T-029: Orders "PendingDocs" filter tab
 
-**Status:** AWAITING_TEST
+**Status:** COMPLETED
 **Scope:** fullstack
 **Type:** feature-addition
 **Date:** 2026-10-06
-**Current subtask:** — (all subtasks done; awaiting manual test)
+**Current subtask:** — (closed)
 **Files:** `services/filemakerService.ts`, `app/admin/(protected)/orders/page.tsx`, `app/dashboard/orders/page.tsx`
 
 ---
@@ -93,7 +93,7 @@ Subtask 1 runs first (foundation); 2 and 3 are disjoint files and may run togeth
 |---|------|------|----------|--------|
 | 1 | Diff read | `status="PendingDocs"` query in both functions | `IsDocNeedAttention: "==1"`, no `Status` key | NOT RUN |
 | 2 | Diff read | `status="Open"` / `"Closed"` / `"AP Pending"` | unchanged `Status == ...` query | NOT RUN |
-| 3 | Manual (admin) | Click PendingDocs | only POs with flag = 1, across vendors | NOT RUN |
+| 3 | Manual (admin) | Click PendingDocs | only POs with flag = 1, across vendors | PASS (developer, 2026-10-06) |
 | 4 | Manual (vendor) | Click PendingDocs | only that vendor's flagged POs | NOT RUN |
 
 **Sanity gate:**
