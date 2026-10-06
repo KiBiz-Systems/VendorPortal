@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { useDashboardData } from "../dashboard-data-context"
 import { formatCurrency } from "@/lib/format"
 
-const statusTabs = ["All", "Open", "Closed", "AP Pending"]
+const statusTabs = ["All", "Open", "Closed", "AP Pending", "PendingDocs"]
 const EMPTY_VALUE = "--"
 const UNKNOWN_STATUS = "Unknown"
 
